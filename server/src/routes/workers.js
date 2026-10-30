@@ -12,6 +12,7 @@ import { asyncH, validate } from '../middleware/error.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { toPublicWorker } from '../utils/trust.js';
 import { scoreWorker } from '../utils/matching.js';
+import { cloudinaryStorage } from '../utils/cloudinary.js';
 
 const router = Router();
 
@@ -26,7 +27,7 @@ const storage = (dir) => multer.diskStorage({
 });
 const imgOnly = (req, file, cb) => (/^image\/(png|jpe?g|webp)$/.test(file.mimetype) ? cb(null, true) : cb(new Error('Only png/jpg/webp images allowed')));
 const docOnly = (req, file, cb) => (/^(image\/(png|jpe?g|webp)|application\/pdf)$/.test(file.mimetype) ? cb(null, true) : cb(new Error('Only images or PDF allowed')));
-const uploadPublic = multer({ storage: storage(UP), fileFilter: imgOnly, limits: { fileSize: 3 * 1024 * 1024 } });
+const uploadPublic = multer({ storage: cloudinaryStorage, limits: { fileSize: 3 * 1024 * 1024 } });
 const uploadPrivate = multer({ storage: storage(PRIV), fileFilter: docOnly, limits: { fileSize: 5 * 1024 * 1024 } });
 
 // ---------- search with matching ----------
@@ -76,15 +77,16 @@ router.patch('/me', requireAuth, requireRole('worker'), validate(profileSchema),
 
 router.post('/me/photo', requireAuth, requireRole('worker'), uploadPublic.single('file'), asyncH(async (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'File missing' });
-  await WorkerProfile.findOneAndUpdate({ user: req.user._id }, { photoUrl: `/uploads/${req.file.filename}` });
-  res.json({ url: `/uploads/${req.file.filename}` });
+  // Cloudinary provides the full HTTPS URL in req.file.path
+  await WorkerProfile.findOneAndUpdate({ user: req.user._id }, { photoUrl: req.file.path });
+  res.json({ url: req.file.path });
 }));
 
 router.post('/me/portfolio', requireAuth, requireRole('worker'), uploadPublic.single('file'), asyncH(async (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'File missing' });
   const p = await WorkerProfile.findOne({ user: req.user._id });
   if (p.portfolio.length >= 12) return res.status(400).json({ message: 'Max 12 portfolio images' });
-  p.portfolio.push({ url: `/uploads/${req.file.filename}`, caption: (req.body.caption || '').slice(0, 100) });
+  p.portfolio.push({ url: req.file.path, caption: (req.body.caption || '').slice(0, 100) });
   await p.save();
   res.status(201).json({ portfolio: p.portfolio });
 }));
